@@ -30,7 +30,7 @@ from torchvision.transforms.v2 import (
     ToDtype,
     InterpolationMode
 )
-
+from torch.optim.lr_scheduler import CosineAnnealingWarmRestarts
 from model import Model
 
 
@@ -66,15 +66,20 @@ def get_args_parser():
     parser.add_argument("--num-workers", type=int, default=10, help="Number of workers for data loaders")
     parser.add_argument("--seed", type=int, default=42, help="Random seed for reproducibility")
     parser.add_argument("--experiment-id", type=str, default="unet-training", help="Experiment ID for Weights & Biases")
+    parser.add_argument("--exp1", action="store_true", help="Run Experiment 1: Cosine Annealing Scheduler")
 
     return parser
 
 
 def main(args):
     # Initialize wandb for logging
+    exp_name = args.experiment_id
+    if args.exp1:
+        exp_name = f"{args.experiment_id}-exp1-annealing"
+
     wandb.init(
         project="5lsm0-cityscapes-segmentation",  # Project name in wandb
-        name=args.experiment_id,  # Experiment name in wandb
+        name=exp_name,  # Experiment name in wandb
         config=vars(args),  # Save hyperparameters
     )
 
@@ -147,8 +152,16 @@ def main(args):
     # Define the loss function
     criterion = nn.CrossEntropyLoss(ignore_index=255)  # Ignore the void class
 
-    # Define the optimizer
-    optimizer = AdamW(model.parameters(), lr=args.lr)
+
+    # Setup Optimizer and Scheduler based on Experiment Flag
+    if args.exp1:
+        # experiment 1: AdamW + Cosine Annealing Warm Restarts
+        optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=1e-2)
+        scheduler = CosineAnnealingWarmRestarts(optimizer, T_0=10, T_mult=2)
+    else:
+        # BASELINE: Standard Adam (or SGD) with a constant learning rate
+        optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
+        scheduler = None
 
     # Training loop
     best_valid_loss = float('inf')
@@ -226,7 +239,10 @@ def main(args):
                     f"best_model-epoch={epoch:04}-val_loss={valid_loss:04}.pt"
                 )
                 torch.save(model.state_dict(), current_best_model_path)
-        
+
+        if scheduler is not None:
+            scheduler.step()
+
     print("Training complete!")
 
     # Save the model
