@@ -30,7 +30,8 @@ from torchvision.transforms.v2 import (
     ToDtype,
     InterpolationMode
 )
-from torch.optim.lr_scheduler import CosineAnnealingWarmRestarts
+from torch.optim.lr_scheduler import CosineAnnealingWarmRestarts, CosineAnnealingLR
+
 from model import Model
 
 
@@ -67,7 +68,7 @@ def get_args_parser():
     parser.add_argument("--seed", type=int, default=42, help="Random seed for reproducibility")
     parser.add_argument("--experiment-id", type=str, default="unet-training", help="Experiment ID for Weights & Biases")
     parser.add_argument("--exp1", action="store_true", help="Run Experiment 1: Cosine Annealing Scheduler")
-
+    parser.add_argument("--exp1v1", action="store_true", help="Run Experiment 1v1: Cosine Annealing Scheduler without restart")
     return parser
 
 
@@ -76,6 +77,8 @@ def main(args):
     exp_name = args.experiment_id
     if args.exp1:
         exp_name = f"{args.experiment_id}-exp1-annealing"
+    elif args.exp1v1:
+        exp_name = f"{args.experiment_id}-exp1v1-annealing"
 
     wandb.init(
         project="5lsm0-cityscapes-segmentation",  # Project name in wandb
@@ -158,6 +161,12 @@ def main(args):
         # experiment 1: AdamW + Cosine Annealing Warm Restarts
         optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=1e-2)
         scheduler = CosineAnnealingWarmRestarts(optimizer, T_0=10, T_mult=2)
+    elif args.exp1v1:
+        # experiment 1v1: AdamW + Cosine Annealing without restart
+        optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=1e-4) # Lower weight decay
+        total_steps = args.epochs * len(train_dataloader)
+        scheduler = CosineAnnealingLR(optimizer, T_max=total_steps) # Stepping per-batch
+
     else:
         # BASELINE: Standard Adam (or SGD) with a constant learning rate
         optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
@@ -183,6 +192,12 @@ def main(args):
             loss = criterion(outputs, labels)
             loss.backward()
             optimizer.step()
+
+            if scheduler is not None:
+                if args.exp1:
+                    scheduler.step(epoch + i / len(train_dataloader))
+                elif args.exp1v1:
+                    scheduler.step()
 
             wandb.log({
                 "train_loss": loss.item(),
@@ -239,9 +254,6 @@ def main(args):
                     f"best_model-epoch={epoch:04}-val_loss={valid_loss:04}.pt"
                 )
                 torch.save(model.state_dict(), current_best_model_path)
-
-        if scheduler is not None:
-            scheduler.step()
 
     print("Training complete!")
 
