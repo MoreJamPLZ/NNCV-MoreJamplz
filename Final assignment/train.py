@@ -59,9 +59,76 @@ def convert_train_id_to_color(prediction: torch.Tensor) -> torch.Tensor:
 
     return color_image
 
+# Constants for Experiment 2 joint transforms
+_to_image = ToImage()
+_resize_img = Resize((256, 256))
+_resize_lbl = Resize((256, 256), interpolation=InterpolationMode.NEAREST)
+_color_jitter = ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2, hue=0.1)
+_normalize = Normalize(mean=(0.2869, 0.3251, 0.2839), std=(0.1870, 0.1902, 0.1872))
+_to_float = ToDtype(torch.float32, scale=True)
+_to_int64 = ToDtype(torch.int64)
+
+def exp2_joint_transforms(image, target):
+    image = _to_image(image)
+    target = _to_image(target)
+    image = _resize_img(image)
+    target = _resize_lbl(target)
+    if torch.rand(1) < 0.5:
+        image = F.horizontal_flip(image)
+        target = F.horizontal_flip(target)
+    image = _color_jitter(image)
+    image = _to_float(image)
+    image = _normalize(image)
+    target = _to_int64(target)
+    return image, target
+
+# Copy-Paste augmentation for Experiment 3
+def exp3_apply_copy_paste(images, labels, target_classes=None):
+    """
+    Applies Copy-Paste augmentation using the current batch as donors.
+    Target train_ids: 6 (Traffic Light), 7 (Traffic Sign), 11 (Person), 12 (Rider), 18 (Bicycle)
+    """
+    if target_classes is None:
+        target_classes = [6, 7, 11, 12, 14, 15, 16, 17, 18]
+
+    # 50% application rate
+    if torch.rand(1) < 0.5:
+        return images, labels, False
+
+    batch_size = images.size(0)
+    
+    # Shuffle the batch to get donor images and labels
+    donor_indices = torch.randperm(batch_size, device=images.device)
+    donor_images = images[donor_indices]
+    donor_labels = labels[donor_indices]
+
+    # Identify pixels belonging to the rare classes in the donor labels
+    mask = torch.zeros_like(donor_labels, dtype=torch.bool, device=labels.device)
+    for cls_id in target_classes:
+        mask |= (donor_labels == cls_id)
+
+    # If no rare classes are in the donor batch, skip to save compute
+    if not mask.any():
+        return images, labels, False
+
+    # Convert mask to float and add channel dimension for blending [B, 1, H, W]
+    mask_float = mask.float().unsqueeze(1)
+
+    # Apply Gaussian blending to the mask to mitigate overfitting
+    # kernel_size and sigma can be tuned. 7 and 2.0 are standard starting points.
+    alpha = F.gaussian_blur(mask_float, kernel_size=[7, 7], sigma=[2.0, 2.0])
+
+    # Composite the images
+    composited_images = alpha * donor_images + (1.0 - alpha) * images
+
+    # Composite the labels (using a hard threshold since labels must be integers)
+    hard_mask = (alpha > 0.5).squeeze(1)
+    composited_labels = torch.where(hard_mask, donor_labels, labels)
+
+    return composited_images, composited_labels, True
+
 
 def get_args_parser():
-
     parser = ArgumentParser("Training script for a PyTorch U-Net model")
     parser.add_argument("--data-dir", type=str, default="./data/cityscapes", help="Path to the training data")
     parser.add_argument("--batch-size", type=int, default=64, help="Training batch size")
@@ -73,6 +140,7 @@ def get_args_parser():
     parser.add_argument("--exp1", action="store_true", help="Run Experiment 1: Cosine Annealing Scheduler")
     parser.add_argument("--exp1v1", action="store_true", help="Run Experiment 1v1: Cosine Annealing Scheduler without restart")
     parser.add_argument("--exp2", action="store_true", help="Run Experiment 2: Standard Data Augmentation and normalization cityscapes")
+    parser.add_argument("--exp3", action="store_true", help="Run Experiment 3: Copy-Paste augmentation for rare classes")
     return parser
 
 
@@ -87,7 +155,9 @@ def main(args):
         tags.append("exp1v1")
     if args.exp2:
         tags.append("exp2")
-        
+    if args.exp3:
+        tags.append("exp3")
+
     if tags:
         exp_name = f"{args.experiment_id}-" + "-".join(tags)
 
@@ -110,7 +180,7 @@ def main(args):
     # Define the device
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    if args.exp2:
+    if args.exp2 or args.exp3:
         # Define the transforms to apply to the data
         img_transform = Compose([
             ToImage(),
@@ -135,33 +205,8 @@ def main(args):
         ToDtype(torch.int64),  # no scaling
     ])
 
-    # Joint transforms for Experiment 2 (applied to both image and mask together)
-    def exp2_joint_transforms(image, target):
-        # 1. Convert to image and resize both
-        image = ToImage()(image)
-        target = ToImage()(target)
-        
-        image = Resize((256, 256))(image)
-        target = Resize((256, 256), interpolation=InterpolationMode.NEAREST)(target)
-        
-        # 2. Joint Spatial Transform (Random Horizontal Flip)
-        if torch.rand(1) < 0.5:
-            image = F.horizontal_flip(image)
-            target = F.horizontal_flip(target)
-            
-        # 3. Image-only Transform (Color Jitter)
-        # We only apply this to the image, so the mask values remain untouched
-        image = ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2, hue=0.1)(image)
-        
-        # 4. Final Formatting (dtypes and Cityscapes normalization)
-        image = ToDtype(torch.float32, scale=True)(image)
-        image = Normalize(mean=(0.2869, 0.3251, 0.2839), std=(0.1870, 0.1902, 0.1872))(image)
-        target = ToDtype(torch.int64)(target) # No scaling for mask
-        
-        return image, target
-
     # Load the dataset and make a split for training and validation
-    if args.exp2:
+    if args.exp2 or args.exp3:
         # Use the joint transforms for Experiment 2
         train_dataset = Cityscapes(
             args.data_dir,
@@ -244,6 +289,9 @@ def main(args):
 
             labels = labels.long().squeeze(1)  # Remove channel dimension
 
+            if args.exp3:
+                images, labels, cp_applied = exp3_apply_copy_paste(images, labels)
+
             optimizer.zero_grad()
             outputs = model(images)
             loss = criterion(outputs, labels)
@@ -256,11 +304,16 @@ def main(args):
                 elif args.exp1v1:
                     scheduler.step()
 
-            wandb.log({
+            log_dict = {
                 "train_loss": loss.item(),
                 "learning_rate": optimizer.param_groups[0]['lr'],
                 "epoch": epoch + 1,
-            }, step=epoch * len(train_dataloader) + i)
+            }
+
+            if args.exp3:
+                log_dict["copy_paste_applied"] = int(cp_applied)
+
+            wandb.log(log_dict, step=epoch * len(train_dataloader) + i)
             
         # Validation
         model.eval()

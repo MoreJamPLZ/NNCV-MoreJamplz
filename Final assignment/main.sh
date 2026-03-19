@@ -9,4 +9,5 @@ python3 train.py \
     --seed 42 \
     --experiment-id "unet-training" \
     --exp1v1 \
-    --exp2 \ 
+    --exp2 \
+    --exp3 \
