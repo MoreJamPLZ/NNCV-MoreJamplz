@@ -18,6 +18,7 @@ from argparse import ArgumentParser
 import wandb
 import torch
 import torch.nn as nn
+import torchvision.transforms.v2.functional as F
 from torch.optim import AdamW
 from torch.utils.data import DataLoader
 from torchvision.datasets import Cityscapes
@@ -28,7 +29,9 @@ from torchvision.transforms.v2 import (
     Resize,
     ToImage,
     ToDtype,
-    InterpolationMode
+    InterpolationMode,
+    RandomHorizontalFlip,
+    ColorJitter
 )
 from torch.optim.lr_scheduler import CosineAnnealingWarmRestarts, CosineAnnealingLR
 
@@ -69,21 +72,29 @@ def get_args_parser():
     parser.add_argument("--experiment-id", type=str, default="unet-training", help="Experiment ID for Weights & Biases")
     parser.add_argument("--exp1", action="store_true", help="Run Experiment 1: Cosine Annealing Scheduler")
     parser.add_argument("--exp1v1", action="store_true", help="Run Experiment 1v1: Cosine Annealing Scheduler without restart")
+    parser.add_argument("--exp2", action="store_true", help="Run Experiment 2: Standard Data Augmentation and normalization cityscapes")
     return parser
 
 
 def main(args):
     # Initialize wandb for logging
     exp_name = args.experiment_id
+    tags = []
+    
     if args.exp1:
-        exp_name = f"{args.experiment_id}-exp1-annealing"
-    elif args.exp1v1:
-        exp_name = f"{args.experiment_id}-exp1v1-annealing"
+        tags.append("exp1")
+    if args.exp1v1:
+        tags.append("exp1v1")
+    if args.exp2:
+        tags.append("exp2")
+        
+    if tags:
+        exp_name = f"{args.experiment_id}-" + "-".join(tags)
 
     wandb.init(
-        project="5lsm0-cityscapes-segmentation",  # Project name in wandb
-        name=exp_name,  # Experiment name in wandb
-        config=vars(args),  # Save hyperparameters
+        project="5lsm0-cityscapes-segmentation",  
+        name=exp_name,  
+        config=vars(args),  
     )
 
     # Create output directory if it doesn't exist
@@ -99,13 +110,23 @@ def main(args):
     # Define the device
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    # Define the transforms to apply to the data
-    img_transform = Compose([
-    ToImage(),
-    Resize((256, 256)),
-    ToDtype(torch.float32, scale=True),
-    Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5)),
-    ])
+    if args.exp2:
+        # Define the transforms to apply to the data
+        img_transform = Compose([
+            ToImage(),
+            Resize((256, 256)),
+            ToDtype(torch.float32, scale=True),
+            # Replaced generic (0.5) with Cityscapes mean and std
+            Normalize(mean=(0.2869, 0.3251, 0.2839), std=(0.1870, 0.1902, 0.1872)), 
+        ])
+    else:
+        # Define the transforms to apply to the data
+        img_transform = Compose([
+        ToImage(),
+        Resize((256, 256)),
+        ToDtype(torch.float32, scale=True),
+        Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5)),
+        ])
 
     # Target transform (mask)
     target_transform = Compose([
@@ -114,16 +135,53 @@ def main(args):
         ToDtype(torch.int64),  # no scaling
     ])
 
-    # Load the dataset and make a split for training and validation
-    train_dataset = Cityscapes(
-    args.data_dir,
-    split="train",
-    mode="fine",
-    target_type="semantic",
-    transform=img_transform,
-    target_transform=target_transform,
-    )
+    # Joint transforms for Experiment 2 (applied to both image and mask together)
+    def exp2_joint_transforms(image, target):
+        # 1. Convert to image and resize both
+        image = ToImage()(image)
+        target = ToImage()(target)
+        
+        image = Resize((256, 256))(image)
+        target = Resize((256, 256), interpolation=InterpolationMode.NEAREST)(target)
+        
+        # 2. Joint Spatial Transform (Random Horizontal Flip)
+        if torch.rand(1) < 0.5:
+            image = F.horizontal_flip(image)
+            target = F.horizontal_flip(target)
+            
+        # 3. Image-only Transform (Color Jitter)
+        # We only apply this to the image, so the mask values remain untouched
+        image = ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2, hue=0.1)(image)
+        
+        # 4. Final Formatting (dtypes and Cityscapes normalization)
+        image = ToDtype(torch.float32, scale=True)(image)
+        image = Normalize(mean=(0.2869, 0.3251, 0.2839), std=(0.1870, 0.1902, 0.1872))(image)
+        target = ToDtype(torch.int64)(target) # No scaling for mask
+        
+        return image, target
 
+    # Load the dataset and make a split for training and validation
+    if args.exp2:
+        # Use the joint transforms for Experiment 2
+        train_dataset = Cityscapes(
+            args.data_dir,
+            split="train",
+            mode="fine",
+            target_type="semantic",
+            transforms=exp2_joint_transforms, 
+        )
+    else:
+        # Use the standard separate transforms for Baseline/Exp1
+        train_dataset = Cityscapes(
+            args.data_dir,
+            split="train",
+            mode="fine",
+            target_type="semantic",
+            transform=img_transform,
+            target_transform=target_transform,
+        )
+
+    # Validation dataset should not have data augmentation, so we use the standard transforms
     valid_dataset = Cityscapes(
         args.data_dir,
         split="val",
@@ -154,7 +212,6 @@ def main(args):
 
     # Define the loss function
     criterion = nn.CrossEntropyLoss(ignore_index=255)  # Ignore the void class
-
 
     # Setup Optimizer and Scheduler based on Experiment Flag
     if args.exp1:
