@@ -10,4 +10,6 @@ python3 train.py \
     --experiment-id "unet-training" \
     --exp1v1 \
     --exp2 \
-    --exp3 \
+    --exp3v1 \
+
+    
