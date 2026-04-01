@@ -1,30 +1,17 @@
 FROM pytorch/pytorch:2.10.0-cuda12.6-cudnn9-runtime
 
-ENV PYTHONDONTWRITEBYTECODE=1
-ENV PYTHONUNBUFFERED=1
-
-RUN apt-get update && apt-get install -y \
-    python3 \
-    python3-pip \
-    python3-dev \
-    python3-venv \
-    && rm -rf /var/lib/apt/lists/*
-
-
-# create virtual environment
-RUN python3 -m venv /opt/venv
-ENV PATH="/opt/venv/bin:$PATH"
-
-
-# install dependencies (add any additional dependencies your project requires)
-RUN pip install --no-cache-dir \
-    torch torchvision --index-url https://download.pytorch.org/whl/cu126
-RUN pip install --no-cache-dir \
-    pillow
+# The base image already has Python, pip, and PyTorch setup.
+# We use --break-system-packages to bypass the strict environment lock safely inside the container.
+RUN pip install --no-cache-dir --break-system-packages \
+    pillow \
+    transformers
 
 WORKDIR /app
+
+# Copy the required scripts and model into the container
 COPY predict.py /app/predict.py
 COPY model.py /app/model.py
 COPY model.pt /app/model.pt
 
+# Run the prediction script
 ENTRYPOINT ["python", "/app/predict.py"]
