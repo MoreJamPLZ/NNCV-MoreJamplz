@@ -62,7 +62,33 @@ def postprocess(pred: torch.Tensor, original_shape: tuple) -> np.ndarray:
     prediction_numpy = prediction_numpy.squeeze()  # Remove batch dim
     return prediction_numpy
  
- 
+def postprocess_ood_entropy(pred: torch.Tensor, original_shape: tuple) -> np.ndarray:
+    """
+    Calculates the Shannon Entropy of the model's predictions to use as an Anomaly Score.
+    High entropy = High uncertainty = Likely an OOD object.
+    """
+    # # 1. Upsample logits to original image size
+    # pred_upsampled = nn.functional.interpolate(
+    #     pred, size=original_shape, mode="bilinear", align_corners=False
+    # )
+    
+    # # 2. Convert raw logits to probabilities (0.0 to 1.0)
+    # probs = torch.softmax(pred_upsampled, dim=1)  
+    
+    # # 3. Calculate Entropy: H = -sum(p * log(p))
+    # # We add a tiny number (1e-8) to prevent log(0) from crashing the math
+    # entropy = -torch.sum(probs * torch.log(probs + 1e-8), dim=1)  
+    
+    # # 4. Convert to a standard numpy array
+    # anomaly_score = entropy.cpu().detach().numpy().squeeze()
+
+    # # Normalize to [0, 1] so scores are comparable across images
+    # anomaly_score = (anomaly_score - anomaly_score.min()) / (anomaly_score.max() - anomaly_score.min() + 1e-8)
+
+    # For all zeros anomaly score (i.e. no OOD detection), simply return a zero array of the original image shape
+    anomaly_score = np.zeros(original_shape, dtype=np.float32)
+    return anomaly_score.astype(np.float32)
+
 def main():
     device = "cuda" if torch.cuda.is_available() else "cpu"
  
@@ -79,8 +105,14 @@ def main():
     )
     model.eval().to(device)
  
-    image_files = list(Path(IMAGE_DIR).glob("*.png"))
+    # image_files = list(Path(IMAGE_DIR).glob("*.png"))
+    # print(f"Found {len(image_files)} images to process.")
+
+    image_files = []
+    for ext in ["*.png", "*.jpg", "*.jpeg"]:
+        image_files.extend(Path(IMAGE_DIR).rglob(ext))
     print(f"Found {len(image_files)} images to process.")
+
 
     with torch.no_grad():
         for img_path in image_files:
@@ -99,14 +131,20 @@ def main():
 
             # Postprocess to segmentation mask
             seg_pred = postprocess(pred, original_shape)
-
             # Save predicted mask
             out_path = Path(OUTPUT_DIR) / img_path.name
             out_path.parent.mkdir(parents=True, exist_ok=True)
             Image.fromarray(seg_pred.astype(np.uint8)).save(out_path)
 
+            # OOD anomaly score
+            anomaly_score = postprocess_ood_entropy(pred, original_shape)
+
+            ood_out_path = Path(OUTPUT_DIR) / (img_path.stem + "_anomaly.png")
+            anomaly_uint8 = (anomaly_score * 255).astype(np.uint8)
+            Image.fromarray(anomaly_uint8).save(ood_out_path)
+
             # FIX 2: Explicitly delete large tensors to free GPU memory immediately
-            del img_tensor, pred
+            del img_tensor, pred, anomaly_score
 
     print("Prediction complete!")
 
