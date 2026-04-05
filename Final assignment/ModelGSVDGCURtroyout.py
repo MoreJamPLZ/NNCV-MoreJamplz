@@ -1,21 +1,67 @@
-from cv2 import transform
-from matplotlib.colors import Normalize
-import torch
-import torch.nn as nn
-import torch.nn.functional as F
-import numpy as np
-from transformers import Dinov2Model, SegformerForSemanticSegmentation, SegformerConfig
-import matplotlib.pyplot as plt
-from PIL import Image
-from torchvision.transforms.v2 import Compose, ToImage, Resize, ToDtype, Normalize, InterpolationMode
 import os
 import glob
+import torch
+import numpy as np
+import torch.nn as nn
+import torch.nn.functional as F
+import matplotlib.pyplot as plt
+from PIL import Image
 
-def gsvd0(A, B):
+# Transformers & Vision Models
+from transformers import Dinov2Model, SegformerForSemanticSegmentation, SegformerConfig
+from torchvision.transforms.v2 import Compose, ToImage, Resize, ToDtype, Normalize, InterpolationMode
+
+# ============================================================================
+# Generalized Singular Value Decomposition (GSVD)
+# ============================================================================
+#
+# Given two matrices A (m1 x n) and B (m2 x n) sharing the same column space 
+# (e.g. same image, different feature extractors),the GSVD finds decompositions 
+# such that:
+#
+#     A = U · diag(C) · X^T
+#     B = V · diag(S) · X^T
+#
+# where C and S satisfy C^2 + S^2 = I (analogous to cos/sin).
+#
+# The generalized singular values are the ratios  c_i / s_i.
+# These ratios indicate how much each direction is "explained" by A vs B:
+#   - Large  c/s  → direction is dominant in A (SegFormer)
+#   - Small  c/s  → direction is dominant in B (DINOv2)
+#   - c/s ≈ 1     → direction is equally shared
+#
+# This is used here to compare the feature subspaces of SegFormer and DINOv2:
+# a shift in the generalized singular value spectrum between in-distribution
+# and out-of-distribution images can serve as an OOD detection signal.
+# ============================================================================
+ 
+
+def gsvd0(A: np.ndarray, B: np.ndarray):
+    """
+    Computes a reduced Generalized Singular Value Decomposition (GSVD) for matrices A and B (Paige & Saunders, 1981).
+    This helps find the generalized principal angles between two feature spaces.  
+
+    Parameters
+    ----------
+    A : array, shape (m1, n) — e.g. (320, 1024) from SegFormer features. 1024 = 32x32 spatial tokens, 320 = feature dim
+    B : array, shape (m2, n) — e.g. (768, 1024) from DINOv2 features. 
+ 
+    Returns
+    -------
+    U : (m1, k) — left singular vectors for A    (SegFormer subspace basis)
+    V : (m2, k) — left singular vectors for B    (DINOv2 subspace basis)
+    X : (n, k)  — shared right singular vectors  (spatial directions)
+    C : (k,)    — cosine-like singular values for A  (0 ≤ c_i ≤ 1)
+    S : (k,)    — sine-like singular values for B    (0 ≤ s_i ≤ 1, c² + s² = 1)
+    """
+
     A = np.asarray(A, dtype=np.float64)
     B = np.asarray(B, dtype=np.float64)
-    M = np.vstack([A, B])
-    Q, R = np.linalg.qr(M, mode='reduced')
+
+    # Compute joint QR factorisation of M = [A; B]
+    M = np.vstack([A, B])  # shape (m1+m2, n). m1 = 320 (SegFormer), m2 = 768 (DINOv2)
+    Q, R = np.linalg.qr(M, mode='reduced') # shape Q=(m1+m2, k), R=(k, n) where k = min(m1+m2, n)
+
     m1 = A.shape[0]
     Q1, Q2 = Q[:m1, :], Q[m1:, :]
     U, c, Wt = np.linalg.svd(Q1, full_matrices=False)
@@ -45,16 +91,19 @@ def deim(U, k):
 class Model(nn.Module):
     def __init__(self, in_channels=3, n_classes=19):
         super().__init__()
-        config = SegformerConfig(
-            num_channels=in_channels, num_labels=n_classes,
-            num_encoder_blocks=4, depths=[3, 6, 40, 3],
-            sr_ratios=[8, 4, 2, 1], hidden_sizes=[64, 128, 320, 512],
-            num_attention_heads=[1, 2, 5, 8], mlp_ratios=[4, 4, 4, 4],
-            hidden_act="gelu", hidden_dropout_prob=0.0,
-            attention_probs_dropout_prob=0.0, classifier_dropout_prob=0.1,
-            decoder_hidden_size=768, semantic_loss_ignore_index=255,
-        )
-        self.segformer = SegformerForSemanticSegmentation(config)
+
+        # self.segformer = SegformerForSemanticSegmentation.from_pretrained("nvidia/segformer-b4-finetuned-cityscapes-1024-1024")
+        self.segformer = SegformerForSemanticSegmentation.from_pretrained("nvidia/segformer-b5-finetuned-cityscapes-1024-1024")
+        # config = SegformerConfig(
+        #     num_channels=in_channels, num_labels=n_classes,
+        #     num_encoder_blocks=4, depths=[3, 6, 40, 3],
+        #     sr_ratios=[8, 4, 2, 1], hidden_sizes=[64, 128, 320, 512],
+        #     num_attention_heads=[1, 2, 5, 8], mlp_ratios=[4, 4, 4, 4],
+        #     hidden_act="gelu", hidden_dropout_prob=0.0,
+        #     attention_probs_dropout_prob=0.0, classifier_dropout_prob=0.1,
+        #     decoder_hidden_size=768, semantic_loss_ignore_index=255,
+        # )
+        # self.segformer = SegformerForSemanticSegmentation(config)
         self.dino = Dinov2Model.from_pretrained("facebook/dinov2-base")
         self.dino.eval()
         for p in self.dino.parameters():
@@ -88,7 +137,7 @@ class Model(nn.Module):
         gen_sv = C / S
         start_idx = 256
         k = 2
-        ratios = gen_sv[start_idx:start_idx + 64]
+        ratios = gen_sv[start_idx:start_idx + 10]
 
         # U_sel = U[:, start_idx:start_idx + k]
         # V_sel = V[:, start_idx:start_idx + k]
@@ -112,7 +161,7 @@ class Model(nn.Module):
         #     imb = -imb
         # imb = imb.reshape(32, 32)
 
-        return logits, ratios, ima, imb
+        return logits, ratios
 
 
 # ==========================================
@@ -166,7 +215,7 @@ if __name__ == "__main__":
                 img_tensor = preprocess(raw_img).unsqueeze(0).to(device)
 
                 with torch.no_grad():
-                    logits, ratios, ima, imb = model(img_tensor)
+                    logits, ratios = model(img_tensor)
 
                 finite_ratios = ratios[np.isfinite(ratios)]
                 max_r = finite_ratios.max()

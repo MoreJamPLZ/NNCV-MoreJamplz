@@ -48,6 +48,7 @@ def deim(U, k):
 class Model(nn.Module):
     def __init__(self, in_channels=3, n_classes=19):
         super().__init__()
+        # self.segformer = SegformerForSemanticSegmentation.from_pretrained("nvidia/segformer-b5-finetuned-cityscapes-1024-1024")
         config = SegformerConfig(
             num_channels=in_channels, num_labels=n_classes,
             num_encoder_blocks=4, depths=[3, 6, 40, 3],
@@ -129,7 +130,7 @@ if __name__ == "__main__":
     os.makedirs(out_dir, exist_ok=True)
     print(f"Output directory: {out_dir}")
 
-    model = Model(in_channels=3, n_classes=19)
+    model = Model()
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model = model.to(device)
     model.eval()
@@ -146,13 +147,13 @@ if __name__ == "__main__":
     datasets = {
         "ID": [
             f"{base}/data/cityscapes/leftImg8bit/val/tubingen",
-            f"{base}/data/cityscapes/leftImg8bit/val/ulm",
-            f"{base}/data/cityscapes/leftImg8bit/val/weimar",
-            f"{base}/data/cityscapes/leftImg8bit/val/zurich",
+            # f"{base}/data/cityscapes/leftImg8bit/val/ulm",
+            # f"{base}/data/cityscapes/leftImg8bit/val/weimar",
+            # f"{base}/data/cityscapes/leftImg8bit/val/zurich",
         ],
         "OOD": [
             f"{base}/fishyscapes_rgb_100",
-            f"{base}/dataset_AnomalyTrack/images",
+            # f"{base}/dataset_AnomalyTrack/images",
         ],
     }
 
