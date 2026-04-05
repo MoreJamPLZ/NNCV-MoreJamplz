@@ -36,14 +36,43 @@ class Model(nn.Module):
             semantic_loss_ignore_index=255,
         )
         self.segformer = SegformerForSemanticSegmentation(config)
+        
+    # For peak performance, we will load pretrained weights in predict.py and set strict=True to ensure no mismatch. The model class itself is just the architecture definition.
+    # def forward(self, x):
+    #     """
+    #     Forward pass.
+    #     Args:
+    #         x: (B, 3, H, W) input tensor
+    #     Returns:
+    #         logits: (B, n_classes, H/4, W/4) — SegFormer outputs at 1/4 resolution
+    #     """
+    #     outputs = self.segformer(pixel_values=x)
+    #     return outputs.logits
+
+    # For the challenge, we need to return both the segmentation logits and an OOD decision. Without threshold
+    # def forward(self, x):
+    #     outputs = self.segformer(pixel_values=x)
+    #     logits = outputs.logits  # segmentation output
+        
+    #     # OOD decision: for baseline, always predict in-distribution
+    #     # True = in-distribution, False = OOD
+    #     include_decision = True
+        
+    #     return logits, include_decision
 
     def forward(self, x):
-        """
-        Forward pass.
-        Args:
-            x: (B, 3, H, W) input tensor
-        Returns:
-            logits: (B, n_classes, H/4, W/4) — SegFormer outputs at 1/4 resolution
-        """
         outputs = self.segformer(pixel_values=x)
-        return outputs.logits
+        logits = outputs.logits  # (B, 19, H/4, W/4)
+
+        # Compute per-image mean entropy as anomaly score
+        probs = torch.softmax(logits, dim=1)
+        entropy = -(probs * torch.log(probs + 1e-8)).sum(dim=1)  # (B, H/4, W/4)
+        mean_entropy = entropy.mean().item()
+
+        # Threshold: images with high entropy are OOD (include=False)
+        # Max possible entropy for 19 classes = log(19) ≈ 2.944
+        # Start with 50% of max as threshold, tune from results
+        THRESHOLD = 0.15  # tune this
+        include_decision = mean_entropy < THRESHOLD
+
+        return logits, include_decision
