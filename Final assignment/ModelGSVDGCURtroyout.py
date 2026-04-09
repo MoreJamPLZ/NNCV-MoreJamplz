@@ -6,6 +6,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import matplotlib.pyplot as plt
 from PIL import Image
+import timm
 
 # Transformers & Vision Models
 from transformers import Dinov2Model, SegformerForSemanticSegmentation, SegformerConfig
@@ -93,21 +94,31 @@ class Model(nn.Module):
         super().__init__()
 
         # self.segformer = SegformerForSemanticSegmentation.from_pretrained("nvidia/segformer-b4-finetuned-cityscapes-1024-1024")
-        self.segformer = SegformerForSemanticSegmentation.from_pretrained("nvidia/segformer-b5-finetuned-cityscapes-1024-1024")
-        # config = SegformerConfig(
-        #     num_channels=in_channels, num_labels=n_classes,
-        #     num_encoder_blocks=4, depths=[3, 6, 40, 3],
-        #     sr_ratios=[8, 4, 2, 1], hidden_sizes=[64, 128, 320, 512],
-        #     num_attention_heads=[1, 2, 5, 8], mlp_ratios=[4, 4, 4, 4],
-        #     hidden_act="gelu", hidden_dropout_prob=0.0,
-        #     attention_probs_dropout_prob=0.0, classifier_dropout_prob=0.1,
-        #     decoder_hidden_size=768, semantic_loss_ignore_index=255,
-        # )
-        # self.segformer = SegformerForSemanticSegmentation(config)
-        self.dino = Dinov2Model.from_pretrained("facebook/dinov2-base")
+        # self.segformer = SegformerForSemanticSegmentation.from_pretrained("nvidia/segformer-b5-finetuned-cityscapes-1024-1024")
+        config = SegformerConfig(
+            num_channels=in_channels, num_labels=n_classes,
+            num_encoder_blocks=4, depths=[3, 6, 40, 3],
+            sr_ratios=[8, 4, 2, 1], hidden_sizes=[64, 128, 320, 512],
+            num_attention_heads=[1, 2, 5, 8], mlp_ratios=[4, 4, 4, 4],
+            hidden_act="gelu", hidden_dropout_prob=0.0,
+            attention_probs_dropout_prob=0.0, classifier_dropout_prob=0.1,
+            decoder_hidden_size=768, semantic_loss_ignore_index=255,
+        )
+        self.segformer = SegformerForSemanticSegmentation(config)
+
+        self.dino = timm.create_model(
+            'vit_base_patch16_dinov3.lvd1689m',
+            pretrained=False,
+            num_classes=0,
+        )
+        state_dict = torch.load("/Users/mirjamh/Documents/Projects/Neural networks for computer vision/NNCV-MoreJamplz/dinov3_vitb16_timm.pth", map_location="cpu", weights_only=True)
+        if 'model' in state_dict:
+            state_dict = state_dict['model']
+        self.dino.load_state_dict(state_dict, strict=True)
         self.dino.eval()
         for p in self.dino.parameters():
             p.requires_grad_(False)
+
 
     def forward(self, x):
         # -- SegFormer --
@@ -115,9 +126,9 @@ class Model(nn.Module):
         logits = seg_outputs.logits
         A_spatial = seg_outputs.hidden_states[2]
 
-        # -- DINOv2 --
-        dino_outputs = self.dino(pixel_values=x)
-        B_tokens = dino_outputs.last_hidden_state[:, 1:, :]
+        # -- DINOv3 --
+        B_tokens = self.dino.forward_features(x)               # returns tensor directly
+        B_tokens = B_tokens[:, 5:, :]
         N = B_tokens.shape[1]
         h = w = int(N ** 0.5)
         B_grid = B_tokens.permute(0, 2, 1).reshape(1, 768, h, w)

@@ -4,7 +4,8 @@ FROM pytorch/pytorch:2.10.0-cuda12.6-cudnn9-runtime
 # We use --break-system-packages to bypass the strict environment lock safely inside the container.
 RUN pip install --no-cache-dir --break-system-packages \
     pillow \
-    transformers
+    transformers \
+    timm 
 
 WORKDIR /app
 
@@ -15,3 +16,4 @@ COPY model.pt /app/model.pt
 
 # Run the prediction script
 ENTRYPOINT ["python", "/app/predict.py"]
+
