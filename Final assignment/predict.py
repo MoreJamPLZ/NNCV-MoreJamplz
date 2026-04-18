@@ -46,6 +46,8 @@ def main():
     state_dict = torch.load(MODEL_PATH, map_location=device, weights_only=True)
     model.load_state_dict(state_dict, strict=True)
     model.eval().to(device)
+    print(f"OOD method: {model.ood_method}")
+    print(f"OOD threshold: {model._active_threshold():.4f}")
 
     image_files = []
     for ext in ["*.png", "*.jpg", "*.jpeg"]:

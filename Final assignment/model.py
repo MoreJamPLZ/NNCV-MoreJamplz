@@ -12,6 +12,7 @@ Forward returns:
 """
 
 import numpy as np
+import os
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -75,6 +76,15 @@ class Model(nn.Module):
         super().__init__()
         self.in_channels = in_channels
 
+        # Runtime OOD mode can be overridden for fast benchmarking:
+        #   OOD_METHOD in {gsvd, energy, maxlogit, entropy}
+        #   OOD_THRESHOLD as float (optional)
+        self.ood_method = os.getenv("OOD_METHOD", "gsvd").strip().lower()
+        self.ood_threshold_override = os.getenv("OOD_THRESHOLD")
+        valid_methods = {"gsvd", "energy", "maxlogit", "entropy"}
+        if self.ood_method not in valid_methods:
+            self.ood_method = "gsvd"
+
         # --- Segmentation head: SegFormer-B5 ---
         config = SegformerConfig(
             num_channels=in_channels, num_labels=n_classes,
@@ -87,15 +97,16 @@ class Model(nn.Module):
         )
         self.segformer = SegformerForSemanticSegmentation(config)
 
-        # --- OOD expert: DINOv3 ViT-B/16 (frozen) ---
-        self.dino = timm.create_model(
-            "vit_base_patch16_dinov3.lvd1689m",
-            pretrained=False,
-            num_classes=0,
-        )
-
-        # --- OOD novice: Nonlinear CNN (frozen) ---
-        self.novice = NonlinearNovice(in_channels=in_channels, feat_dim=320)
+        # --- OOD expert/novice (only needed for GSVD mode) ---
+        self.dino = None
+        self.novice = None
+        if self.ood_method == "gsvd":
+            self.dino = timm.create_model(
+                "vit_base_patch16_dinov3.lvd1689m",
+                pretrained=False,
+                num_classes=0,
+            )
+            self.novice = NonlinearNovice(in_channels=in_channels, feat_dim=320)
 
         # --- GSVD hyperparameters (from ablation studies) ---
         # UPDATE THESE after your final validation experiments
@@ -103,19 +114,62 @@ class Model(nn.Module):
         self.gsvd_start_idx = 256
         self.gsvd_n_ratios = 20
 
+        # --- Logit-based OOD defaults (tune with tune_threshold.py) ---
+        # Conventions: higher score means more OOD-like.
+        self.register_buffer("energy_threshold", torch.tensor(-2.5))
+        self.register_buffer("maxlogit_threshold", torch.tensor(-6.0))
+        self.register_buffer("entropy_threshold", torch.tensor(2.0))
+
     def forward(self, x):
         # 1. Segmentation
         seg_out = self.segformer(pixel_values=x)
         logits = seg_out.logits
 
         # 2. OOD detection via GSVD
-        include = self._detect_ood(x)
+        include = self._detect_ood(x, logits)
 
         return logits, include
 
+    def _active_threshold(self):
+        if self.ood_threshold_override is not None:
+            try:
+                return float(self.ood_threshold_override)
+            except ValueError:
+                pass
+
+        if self.ood_method == "energy":
+            return float(self.energy_threshold.item())
+        if self.ood_method == "maxlogit":
+            return float(self.maxlogit_threshold.item())
+        if self.ood_method == "entropy":
+            return float(self.entropy_threshold.item())
+        return float(self.ood_threshold.item())
+
     @torch.no_grad()
-    def _detect_ood(self, x):
+    def _logit_ood_score(self, logits):
+        if self.ood_method == "energy":
+            # Energy score: OOD tends to have lower logsumexp, so negate.
+            return float((-torch.logsumexp(logits.float(), dim=1)).mean().item())
+
+        if self.ood_method == "maxlogit":
+            # Convert to "higher is more OOD" by negating max logit confidence.
+            return float((-logits.float().amax(dim=1)).mean().item())
+
+        # entropy
+        probs = torch.softmax(logits.float(), dim=1)
+        entropy = -(probs * torch.log(probs + 1e-8)).sum(dim=1)
+        return float(entropy.mean().item())
+
+    @torch.no_grad()
+    def _detect_ood(self, x, logits):
         """Returns True if in-distribution, False if OOD."""
+        if self.ood_method in {"energy", "maxlogit", "entropy"}:
+            score = self._logit_ood_score(logits)
+            return score <= self._active_threshold()
+
+        if self.dino is None or self.novice is None:
+            return False
+
         # Novice features
         A_feat = self.novice(x)  # (1, 320, 32, 32)
 
@@ -147,4 +201,4 @@ class Model(nn.Module):
 
         score = float(np.median(finite))
         # OOD images have HIGHER scores → if score > threshold, it's OOD
-        return score <= self.ood_threshold.item()
+        return score <= self._active_threshold()

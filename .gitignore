@@ -181,3 +181,7 @@ local_data/
 fishyscapes_lostandfound/
 fishyscapes_rgb_100/
 dataset_AnomalyTrack/
+bdd100k_500/ 
+
+#DinoV3 pretrained weights
+dinov3_vitb16_timm.pth
