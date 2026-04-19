@@ -1,45 +1,9 @@
 # Getting Started Guide
 Welcome to the `Final Assignment` repository! This guide will help you set up your environment and tools necessary for your work on our project using a remote High-Performance Computing (HPC) cluster.
 
-## Environment Setup
-### Visual Studio Code (VSCode)
-We'll use VSCode as our Integrated Development Environment (IDE) for Python development. VSCode offers:
-- **Lightweight and Fast**: A robust editor without being resource-heavy.
-- **Extensions**: Support for Python, Git, SSH, and many other extensions.
-- **Integrated Terminal**: Perform cluster operations and run scripts without leaving the editor.
-- **Remote Development**: With extensions like "Remote - SSH," you can edit files directly on the cluster.
-
-If you haven't installed it yet, you can download it [here](https://code.visualstudio.com/download).
-
-### GitHub
-We will be hosting our code on GitHub. GitHub is a cloud-based platform for version control and collaboration, allowing us to:
-- **Manage Code Versions**: Keep track of all changes to the codebase, so we can revert to earlier versions if needed.
-- **Collaborate**: Multiple team members can work on the same codebase simultaneously without conflicts.
-- **Backup Code Securely**: Store your code on a remote server to avoid losing work due to local machine issues.
-- **Integrate with Tools**: GitHub integrates seamlessly with CI/CD tools, testing frameworks, and more to streamline development.
-
-If you don't have an account yet, you can [sign up here](https://github.com/join). Also make sure to have Git installed on your local system. ([Download here!](https://git-scm.com/downloads))
-
-### Weights and Biases (W&B)
-Weights and Biases (W&B) is a powerful tool for experiment tracking and visualization, especially useful in cluster environments where resources are shared, and reproducibility is critical. Here's why W&B is invaluable:
-- **Track Training Metrics**: Automatically log your model's performance, loss curves, and other metrics in real-time.
-- **Visualize Results**: Gain insights from your experiments through intuitive graphs and dashboards.
-- **Collaborate**: Share your experiment logs with team members easily, fostering collaboration.
-- **Centralize Experiment Management**: Keep a centralized history of all experiments for reproducibility and comparison.
-
-You can sign up for an account [here](https://www.wandb.com/).
-
-### MobaXTerm
-To connect to the remote HPC cluster, we'll use MobaXTerm. It provides:
-- **SSH Connections**: Securely log in to remote servers.
-- **SFTP Browser**: Drag-and-drop file transfers between your local machine and the cluster.
-- **Multiple Protocols**: Support for SSH, X11 forwarding, and more, making it a versatile tool for remote work.
-
-Download and installation instructions can be found [here](https://mobaxterm.mobatek.net/).
 
 ### Docker (Required for challenge submission)
 For challenge submission, your model must be packaged as a self-contained Docker image and exported to a `.tar` file.
-
 - Install **Docker Desktop**: https://www.docker.com/products/docker-desktop/
 - During installation, keep default settings unless your system requires specific changes.
 - After installation, start Docker Desktop and wait until it reports that Docker is running.

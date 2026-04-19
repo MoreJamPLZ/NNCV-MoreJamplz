@@ -176,12 +176,12 @@ Final
 Final assignment/.env
 
 # Data folders
-data/
+ID data/
 local_data/
-fishyscapes_lostandfound/
-fishyscapes_rgb_100/
-dataset_AnomalyTrack/
-bdd100k_500/ 
+datasets/ID data/
+datasets/OOD data/fishyscapes_rgb_100/
+datasets/OOD data/dataset_AnomalyTrack/
+datasets/OOD data/bdd100k_500/ 
 
 #DinoV3 pretrained weights
 dinov3_vitb16_timm.pth
