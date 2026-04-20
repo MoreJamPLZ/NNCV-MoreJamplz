@@ -184,4 +184,8 @@ datasets/OOD data/dataset_AnomalyTrack/
 datasets/OOD data/bdd100k_500/ 
 
 #DinoV3 pretrained weights
-dinov3_vitb16_timm.pth
+weights/dinov3_vitb16_timm.pth
+weights/segformer.pt
+weights/novice_nonlinear_seed1.pt
+
+results/
