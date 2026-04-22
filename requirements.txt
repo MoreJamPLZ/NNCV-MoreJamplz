@@ -1,0 +1,9 @@
+# Core dependencies for local training, experiments, and model/weights download
+numpy
+Pillow
+torch
+torchvision
+timm
+transformers
+huggingface_hub
+wandb

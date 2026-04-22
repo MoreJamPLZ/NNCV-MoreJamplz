@@ -2,6 +2,11 @@
 
 This guide explains how to package your trained model into a self-contained Docker image, export it to a `.tar` file, and submit it to the challenge server.
 
+Important context for this repository:
+- `OOD_experiments.ipynb` is the main place where experiments, scores, and comparisons were computed.
+- `Exp1_UnetFolder` ... `Exp9_GSVDFolderThres5.5` are submission-preparation folders.
+- The usual flow is: pick one `Exp*` folder, copy the required scripts one level up into `Final assignment/`, create `model.pt`, then build/export Docker.
+
 It is based on:
 - `predict.py`, including `Model`, `preprocess`, `postprocess`, and `main`
 - `model.py`
@@ -25,25 +30,28 @@ So your `/app/model.pt` **must match** the architecture in `model.py`.
 
 ---
 
-## 2. Put your best trained checkpoint in place
+## 2. Prepare `model.pt` from your chosen `Exp*` folder
 
-Training saves checkpoints from `train.py`, typically under:
-`checkpoints/<experiment-id>/...`
+Pick the submission variant you want to submit (for example `Exp1_UnetFolder` or `Exp5_GSVDFolderOptimized`).
 
-Pick your best checkpoint and copy/rename it to:
+From repo root, copy the scripts from that folder into `Final assignment/` (one level up):
 
-- `Final assignment/model.pt`
+```bash
+cp "Final assignment/Exp5_GSVDFolderOptimized/model.py" "Final assignment/model.py"
+cp "Final assignment/Exp5_GSVDFolderOptimized/predict.py" "Final assignment/predict.py"
+cp "Final assignment/Exp5_GSVDFolderOptimized/make weights.py" "Final assignment/make weights.py"
+```
 
-Example from repo root:
+Then run the weight script to generate `Final assignment/model.pt`:
+
+```bash
+python "Final assignment/make weights.py"
+```
+
+Alternative (if your variant uses checkpoints directly): copy your best checkpoint to `Final assignment/model.pt`, e.g.
 
 ```bash
 cp "Final assignment/checkpoints/unet-training/best_model-epoch=....pt" "Final assignment/model.pt"
-```
-
-On Windows PowerShell:
-
-```powershell
-Copy-Item "Final assignment\checkpoints\unet-training\best_model-epoch=....pt" "Final assignment\model.pt"
 ```
 
 ---
