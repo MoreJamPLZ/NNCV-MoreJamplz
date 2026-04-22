@@ -177,7 +177,6 @@ Final assignment/.env
 
 # Data folders
 ID data/
-local_data/
 datasets/ID data/
 datasets/OOD data/fishyscapes_rgb_100/
 datasets/OOD data/dataset_AnomalyTrack/
