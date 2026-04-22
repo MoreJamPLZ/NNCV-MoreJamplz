@@ -8,8 +8,3 @@ python3 train.py \
     --num-workers 10 \
     --seed 42 \
     --experiment-id "unet-training" \
-    --exp1v1 \
-    --exp2 \
-    --exp3v1 \
-
-    
