@@ -6,6 +6,13 @@ This repo contains the code behind the paper *"GSVD-Based Outlier Detection Scor
 
 ---
 
+## Submission Details
+**Best performing model(s):**
+* **For peak performance:** `MoreJamPLZSegFinal`
+* **For out of distribution:** `MoreJamPLZ_entropy_0.1585`
+
+---
+
 ## What's in this folder
 
 - `OOD_experiments.ipynb`:
