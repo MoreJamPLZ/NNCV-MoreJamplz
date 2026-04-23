@@ -11,7 +11,6 @@ It is based on:
 - `predict.py`, including `Model`, `preprocess`, `postprocess`, and `main`
 - `model.py`
 - `Dockerfile`
-- `train.py`
 
 ---
 

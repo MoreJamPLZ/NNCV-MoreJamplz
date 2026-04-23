@@ -1,5 +1,6 @@
-# Core dependencies for local training, experiments, and model/weights download
+# Core dependencies
 numpy
+pandas
 Pillow
 torch
 torchvision
@@ -7,3 +8,6 @@ timm
 transformers
 huggingface_hub
 wandb
+tqdm
+scikit-learn
+matplotlib
